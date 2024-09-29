@@ -1,31 +1,56 @@
 const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
-const { table, group } = require("console");
-const { type } = require("os");
 
 //URL y selectores
 const URL =
   "http://sij.usfx.bo/elibro/principal.usfx?cu=null&ca=INV&idLibro=null";
-const diplomado = "#j_idt16\\:j_idt107\\:0\\:_t110";
-const diplomadosSelector = '[id^="j_idt16:j_idt107:"][id$=":_t110"]';
-/**#############################################################*/
-let categoriaBuscar = "Agronomia";
-// const selectorPagina = "#j_idt16\\:j_idt68\\:0\\:_t70";
-
-/**#############################################################*/
+// const diplomado = "#j_idt16\\:j_idt107\\:0\\:_t110";
+const categoriasSelector = '[id^="j_idt16:j_idt107:"][id$=":_t110"]';
 const librosSelector = "[id^='j_idt16:j_idt49:'][id$=':_t55']";
 const selectorPaginaciones = '[id^="j_idt16:j_idt68:"][id$=":_t70"]';
+/**######################################################################*/
+let categoriaBuscar = "Diplomado en Docencia para Educación Superior";
+/**######################################################################*/
+
+//Funcion para obtener los titulos de las categorias
+const obtenerTitulosCategorias = async (page, selectorCategorias) => {
+  try {
+    //Esperar y extraer todos los titulos de las categorias
+    await page.waitForSelector(selectorCategorias, { timeout: 10000 });
+    const titulosCategorias = await page.$$eval(
+      selectorCategorias,
+      (elements) => elements.map((el) => el.textContent.trim().toLowerCase())
+    );
+
+    console.group("Todas las categorias");
+    console.table(titulosCategorias);
+    console.groupEnd("Todas las categorias");
+
+    return titulosCategorias;
+  } catch (error) {
+    console.log("Error al obtener los titulos de las categorias:", error);
+    return [];
+  }
+};
 
 //Funcion para obtener el total de paginaciones
 const obtenerTotalPaginaciones = async (page, selectorPaginacion) => {
   try {
+    //Intentar encontrar el selector de paginacion
+    const paginacionExistente = await page.$(selectorPaginacion);
+
+    //Si no existe paginacion, retornar false
+    if (!paginacionExistente) {
+      console.log("No se encontró paginación.");
+      return false;
+    }
+
     //Esperar por el selector de paginacion y extraer su texto (número)
     await page.waitForSelector(selectorPaginacion, { timeout: 10000 });
     const paginacion = await page.$$eval(selectorPaginacion, (elements) =>
       elements.map((el) => el.textContent.trim().toLowerCase())
     );
-
     console.log(paginacion.length);
 
     //Si se encontraron paginaciones, devolver el numero total
@@ -40,8 +65,7 @@ const obtenerTotalPaginaciones = async (page, selectorPaginacion) => {
       return false;
     }
   } catch (error) {
-    console.log("No hay paginaciones: ", error);
-    return false;
+    console.log("Error al obtener paginacion: ", error);
   }
 };
 
@@ -80,8 +104,9 @@ const crearDirectorioSiNoExiste = (directorio) => {
 //Funcion para capturar y guardar la imagen
 const capturarImagen = async (page, directorioDestino, pagina) => {
   try {
-    await page.waitForSelector(".documentPageView img", { timeout: 10000 });
-    const imagen = await page.$(".documentPageView img");
+    const imagenSelector = ".documentPageView img";
+    await page.waitForSelector(imagenSelector, { timeout: 10000 });
+    const imagen = await page.$(imagenSelector);
     const imagenBuffer = await imagen.screenshot();
     const rutaArchivo = path.join(directorioDestino, `${pagina}.png`);
     fs.writeFileSync(rutaArchivo, imagenBuffer);
@@ -101,40 +126,27 @@ const extractor = async () => {
     //Navegar a la pagina principal
     await page.goto(URL, { waitUntil: "networkidle" });
 
-    //Esperar y extraer todos los titulos de los diplomados
-    await page.waitForSelector(diplomadosSelector, { timeout: 10000 });
-    const titulosDiplomados = await page.$$eval(
-      diplomadosSelector,
-      (elements) =>
-        elements
-          .map((el) => el.textContent.trim().toLowerCase())
-          .filter((text) => text.includes("diplomado"))
+    //Esperar y extraer todos los titulos de las categorias
+    const titulosCategorias = await obtenerTitulosCategorias(
+      page,
+      categoriasSelector
     );
 
-    console.table(titulosDiplomados);
-    console.table(titulosDiplomados.length);
+    if (titulosCategorias.length === 0) {
+      console.error("No se encontraron categorias. Finalizando la ejecucion");
+      return;
+    }
 
-    //Esperar y extraer todos los titulos del total de libros
-    await page.waitForSelector(diplomadosSelector, { timeout: 10000 });
-    const titulosTotalLibros = await page.$$eval(
-      diplomadosSelector,
-      (elements) => elements.map((el) => el.textContent.trim().toLowerCase())
-    );
-
-    console.table(titulosTotalLibros);
-    console.table(titulosTotalLibros.length);
-
-    //Iterar sobre los diplomados para hacer click en la categoria buscada
-    for (let i = 0; i < titulosTotalLibros.length; i++) {
+    //Iterar sobre las categorias para hacer click en la categoria buscada
+    for (let i = 0; i < titulosCategorias.length; i++) {
       const selectorCategoria = `#j_idt16\\:j_idt107\\:${i}\\:_t110`;
 
       //Esperar por el selector de la categoria y obtener su texto
       await page.waitForSelector(selectorCategoria, { timeout: 10000 });
-      const tituloCategoria = await page.$eval(selectorCategoria, (element) =>
-        element.textContent.trim().toLowerCase()
+      const tituloCategoria = await page.$eval(
+        selectorCategoria,
+        (element) => element.textContent
       );
-
-      categoriaBuscar = categoriaBuscar.trim().toLowerCase();
 
       console.log("titulo categoria buscar: ", categoriaBuscar);
       console.log("titulo categoria : ", tituloCategoria);
@@ -142,47 +154,39 @@ const extractor = async () => {
       if (tituloCategoria === categoriaBuscar) {
         const flag = i;
         //hace click en la categoria indicada
-        await page.waitForSelector(`#j_idt16\\:j_idt107\\:${i}\\:_t108`, {
+        await page.waitForSelector(`#j_idt16\\:j_idt107\\:${flag}\\:_t108`, {
           timeout: 10000,
         });
-        await page.click(`#j_idt16\\:j_idt107\\:${i}\\:_t108`);
+        await page.click(`#j_idt16\\:j_idt107\\:${flag}\\:_t108`);
 
         // Espera opcional para ver el resultado
-        await page.waitForTimeout(3000);
+        await page.waitForTimeout(2000);
 
         //Obtener el total de paginaciones
-        let totalPaginaciones = await obtenerTotalPaginaciones(
+        const totalPaginaciones = await obtenerTotalPaginaciones(
           page,
           selectorPaginaciones
         );
 
-        if (totalPaginaciones === false) {
-          totalPaginaciones = 1;
+        let paginaciones = 1;
+
+        if (!totalPaginaciones === false) {
+          paginaciones = totalPaginaciones;
         }
 
-        for (let j = 0; j < totalPaginaciones; j++) {
-          //hace click en la paginacion
-          await page.waitForSelector(`#j_idt16\\:j_idt68\\:${j}\\:_t70`, {
-            timeout: 10000,
-          });
-          await page.click(`#j_idt16\\:j_idt68\\:${j}\\:_t70`);
+        for (let j = 0; j < paginaciones; j++) {
+          //Hacer click en la paginacion
+          try {
+            await page.waitForSelector(`#j_idt16\\:j_idt68\\:${j}\\:_t70`, {
+              timeout: 10000,
+            });
+            await page.click(`#j_idt16\\:j_idt68\\:${j}\\:_t70`);
 
-          // Espera opcional para ver el resultado
-          await page.waitForTimeout(3000);
-
-          // /***** ###### Explorar # paginaciones cambiar el digito  ###### ****** */
-          // try {
-          //   await page.waitForSelector(selectorPagina, {
-          //     timeout: 10000,
-          //   });
-          //   await page.click(selectorPagina);
-
-          //   // Espera opcional para ver el resultado
-          //   await page.waitForTimeout(3000);
-          // } catch (error) {
-          //   console.log(error);
-          // }
-          // /***** ###### ###################### ###### ****** */
+            // Espera opcional para ver el resultado
+            await page.waitForTimeout(2000);
+          } catch (error) {
+            console.log("No hay paginacion...", error);
+          }
 
           //Esperar por el selector de libros y extraer su texto
           await page.waitForSelector(librosSelector, { timeout: 10000 });
@@ -216,12 +220,12 @@ const extractor = async () => {
                 await page.click(`#j_idt16\\:j_idt107\\:${flag}\\:_t108`);
 
                 // Espera opcional para ver el resultado
-                await page.waitForTimeout(3000);
+                await page.waitForTimeout(2000);
               } catch (error) {
                 console.log(error);
               }
 
-              /***** ###### Explorar # paginas cambiar el digito  ###### ****** */
+              /***** ###### Explorar # paginaciones ###### ****** */
               try {
                 //hace click en la paginacion
                 await page.waitForSelector(`#j_idt16\\:j_idt68\\:${j}\\:_t70`, {
@@ -230,15 +234,7 @@ const extractor = async () => {
                 await page.click(`#j_idt16\\:j_idt68\\:${j}\\:_t70`);
 
                 // Espera opcional para ver el resultado
-                await page.waitForTimeout(3000);
-
-                // await page.waitForSelector(selectorPagina, {
-                //   timeout: 10000,
-                // });
-                // await page.click(selectorPagina);
-
-                // // Espera opcional para ver el resultado
-                // await page.waitForTimeout(3000);
+                await page.waitForTimeout(2000);
               } catch (error) {
                 console.log(error);
               }
@@ -254,7 +250,7 @@ const extractor = async () => {
                 await page.click(selectorLibro);
 
                 // Espera opcional para ver el resultado
-                await page.waitForTimeout(3000);
+                await page.waitForTimeout(2000);
 
                 //----------------------------------------
                 // Obtener el total de páginas
@@ -318,7 +314,7 @@ const extractor = async () => {
                   );
 
                   // Espera opcional para ver el resultado
-                  await page.waitForTimeout(3000);
+                  await page.waitForTimeout(2000);
                 } catch (error) {
                   console.error(error);
                 }
